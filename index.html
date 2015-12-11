@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://cdnjs.cloudflare.com/ajax/libs/fetch/0.10.1/fetch.min.js"></script>
+<link rel="icon" href="http://spiddal.marine.ie/favicon.ico">
+<title>Anispectrogram: D3.js Animated Spectrogram Example</title>
+<style>
+
+body {
+  position: relative;
+}
+
+svg,
+canvas {
+  position: absolute;
+  display: inline;
+}
+
+.axis text {
+  font: 10px sans-serif;
+}
+
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+
+.axis path {
+  display: none;
+}
+
+
+</style>
+<script>
+// see http://bl.ocks.org/mbostock/3074470
+
+var width = 960,
+    height = 500;
+  function spectrogram(data,buckets){
+  var dx = data[0].length-2,
+      dy = data.length;
+
+
+    var min = 1000, max=-1000;
+    for(var i=0;i<data.length;i++){
+       for(var j=2;j<data[i].length;j++){
+    		    if(data[i][j]<min) min = data[i][j];
+    		    if(data[i][j]>max) max = data[i][j];
+    	   }
+   	}
+
+  // Fix the aspect ratio.
+  // var ka = dy / dx, kb = height / width;
+  // if (ka < kb) height = width * ka;
+  // else width = height / ka;
+
+  var x = d3.scale.linear()
+      .domain([0, dx])
+      .range([0, width]);
+
+  var y = d3.scale.linear()
+      .domain([0, dy])
+      .range([height, 0]);
+
+  var color = d3.scale.linear()
+      .domain([min,max])
+      .range(["#0a0", "#fff"]);
+
+  var xAxis = d3.svg.axis()
+  	  .scale(x)
+      .orient("top")
+      .tickFormat(function(d, i){
+   		 return ""+buckets[d]+" Hz";
+	});
+
+  var yAxis = d3.svg.axis()
+      .scale(y)
+      .orient("right")
+      .tickFormat(function(d, i){
+      	 return d < data.length?data[data.length-d-1][1]:"";
+	   });
+;
+
+  d3.select("body").append("canvas")
+      .attr("width", dx)
+      .attr("height", dy)
+      .style("width", width + "px")
+      .style("height", height + "px")
+      .call(drawImage);
+
+  var svg = d3.select("body").append("svg")
+      .attr("width", width)
+      .attr("height", height);
+
+  svg.append("g")
+      .attr("class", "x axis")
+      .attr("transform", "translate(0," + height + ")")
+      .call(xAxis)
+      .call(removeZero);
+
+  svg.append("g")
+      .attr("class", "y axis")
+      .call(yAxis)
+      .call(removeZero);
+  // Compute the pixel colors; scaled by CSS.
+  function drawImage(canvas) {
+    var context = canvas.node().getContext("2d"),
+        image = context.createImageData(dx, dy);
+
+    for (var y = 0, p = -1; y < dy; ++y) {
+      for (var x = 0; x < dx; ++x) {
+        var c = d3.rgb(color(data[y][x+2]));
+        image.data[++p] = c.r;
+        image.data[++p] = c.g;
+        image.data[++p] = c.b;
+        image.data[++p] = 255;
+      }
+    }
+
+    context.putImageData(image, 0, 0);
+  }
+
+  function removeZero(axis) {
+    axis.selectAll("g").filter(function(d) { return !d; }).remove();
+  }
+ }
+</script>
+<script>
+function getFFTData(t){
+    var text = t.split('\n'), l = "";
+    var start_date = "";
+    while(text.length > 0 ){
+    	l = text.shift();
+    	if(l.match("^Start Date")){
+    		start_date = l.split(/\s+/)[2];
+    	}
+    	if( l.match("^Data:.*$")){
+    		break;
+    	}
+    }
+    var data = [];
+    for(var i=0;i<text.length;i++){
+    	var a = text[i].split(/\t/);
+    	if(i>0 && a.length < data[i-1].length){
+    		break;
+    	}
+    	data[i] = a;
+    	var time = data[i][0];
+    	data[i] = data[i].slice(6);
+    	for(var j=0; j<data[i].length;j++){
+    		data[i][j] = parseInt(data[i][j]);
+    	}
+    	data[i].unshift(time);
+    	data[i].unshift(start_date);
+    }
+    return data;
+
+}
+function checkStatus(response) {
+  if (response.status >= 200 && response.status < 300) {
+    return response
+  } else {
+    var error = new Error(response.statusText)
+    error.response = response
+    throw error
+  }
+}
+var fft_data = [];
+var buckets = [];
+ var urls = [];
+ var urlprefix = "http://spidvid.cloudapp.net/data/hydrophones/SBF1323/2015/12/10/SBF1323_20151210_";
+ var urlsuffix = "00.txt";
+for(var h=0; h<23; h++){
+	for(var m=0;m<59; m++){
+		var hh = "0"+h;
+		var mm = "0"+m;
+		urls.push(urlprefix+hh.substring(hh.length-2)+mm.substring(mm.length-2)+urlsuffix);
+	}
+}
+
+var min_lines = 250;
+var max_lines = 1000;
+var max_buffer = 50000;
+var shift_lines = 50;
+var update_freq = 50;
+var update_spectrogram = function(){
+	try{
+		if(fft_data.length > max_lines){
+			for(var i=0;i<shift_lines;i++){
+			  fft_data.shift();
+			}
+		}
+		if(fft_data.length>0){
+		  var slice = Math.min(max_lines,fft_data.length);
+		  var data = fft_data.slice(0,slice);
+		  //data = data.reverse();
+          spectrogram(data,buckets);
+        }
+	}finally{
+		setTimeout(update_spectrogram,update_freq);
+	}
+	first_time = false;
+};
+var do_fetch_next = function(){
+ 	if(fft_data.length >= max_buffer){
+        setTimeout(do_fetch_next,1000);
+        return;
+ 	}
+	var url = urls.shift();
+    if(url){
+    	do_fetch(url);
+    }else{
+    	setTimeout(do_fetch_next,1000);
+    }
+};
+ var do_fetch = function(url){
+  fetch(url)
+    .then(checkStatus)
+    .then(function(response) {
+  	return response.text();
+  }).then(function(t) {
+  	var data = getFFTData(t);
+    buckets = data.shift();
+    fft_data.push.apply(fft_data,data);
+    setTimeout(do_fetch_next,500);
+  }).catch(function(error) {
+    console.log('request failed', error);
+    do_fetch_next();
+  })
+};
+</script>
+</head>
+<body>
+<h1>D3.js Animated Spectrogram Example</h1>
+<p>Animated spectrogram visualisation using of <a href="http://oceansonics.com/iclisten-smart-hydrophones/">hydrofone</a> 
+data from the <a href="http://spiddal.marine.ie/data.html">Irish Marine Institute</a> implemented in <a href="http://d3js.org">d3.js</a>.</p>
+<p>This is a preliminary implementation without optimisations, for which the <a href="https://github.com/fullergalway/anispectrogram">full source</a> 
+is available on github, where merge requests are welcome.</p>
+<p>Anispectrogram is based on <a href="see http://bl.ocks.org/mbostock/3074470">mbostock's heatmap example</a>
+and is released under the <a href="http://opensource.org/licenses/BSD-3-Clause">BSD license</a>. 
+Copyright 2015 <a href="https://ie.linkedin.com/in/robertfuller">Rob Fuller</a></p>
+<script>
+do_fetch_next();
+setTimeout(update_spectrogram,100);
+</script>
+<a href="https://github.com/fullergalway/anispectrogram"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://camo.githubusercontent.com/e7bbb0521b397edbd5fe43e7f760759336b5e05f/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f677265656e5f3030373230302e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_green_007200.png"></a>
+</body>
+</html>
