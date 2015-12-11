@@ -67,8 +67,8 @@ var width = 960,
       .range([height, 0]);
 
   var color = d3.scale.linear()
-      .domain([min,max])
-      .range(["#0a0", "#fff"]);
+      .domain([10,20,30,40,50])
+      .range(["#0000ff","#33cc33","#ffff00","#ff9933", "#cc3300"]);
 
   var xAxis = d3.svg.axis()
   	  .scale(x)
