@@ -41,17 +41,9 @@ canvas {
 var width = 960,
     height = 500;
   function spectrogram(data,buckets){
-  var dx = data[0].length-2,
-      dy = data.length;
+  var dy = data[0].length-2,
+      dx = data.length;
 
-
-    var min = 1000, max=-1000;
-    for(var i=0;i<data.length;i++){
-       for(var j=2;j<data[i].length;j++){
-    		    if(data[i][j]<min) min = data[i][j];
-    		    if(data[i][j]>max) max = data[i][j];
-    	   }
-   	}
 
   // Fix the aspect ratio.
   // var ka = dy / dx, kb = height / width;
@@ -70,42 +62,42 @@ var width = 960,
       .domain([10,20,30,40,50])
       .range(["#0000ff","#33cc33","#ffff00","#ff9933", "#cc3300"]);
 
-  var xAxis = d3.svg.axis()
-  	  .scale(x)
-      .orient("top")
+  var yAxis = d3.svg.axis()
+  	  .scale(y)
+      .orient("right")
       .tickFormat(function(d, i){
    		 return ""+buckets[d]+" Hz";
 	});
 
-  var yAxis = d3.svg.axis()
-      .scale(y)
-      .orient("right")
+  var xAxis = d3.svg.axis()
+      .scale(x)
+      .orient("top")
       .tickFormat(function(d, i){
       	 return d < data.length?data[data.length-d-1][1]:"";
 	   });
-;
 
-  d3.select("body").append("canvas")
+  d3.select("canvas")
       .attr("width", dx)
       .attr("height", dy)
       .style("width", width + "px")
       .style("height", height + "px")
       .call(drawImage);
 
-  var svg = d3.select("body").append("svg")
+  var svg = d3.select("svg")
       .attr("width", width)
       .attr("height", height);
 
-  svg.append("g")
+  d3.select("#xaxis")
       .attr("class", "x axis")
       .attr("transform", "translate(0," + height + ")")
       .call(xAxis)
       .call(removeZero);
 
-  svg.append("g")
+  d3.select("#yaxis")
       .attr("class", "y axis")
       .call(yAxis)
       .call(removeZero);
+
   // Compute the pixel colors; scaled by CSS.
   function drawImage(canvas) {
     var context = canvas.node().getContext("2d"),
@@ -113,7 +105,7 @@ var width = 960,
 
     for (var y = 0, p = -1; y < dy; ++y) {
       for (var x = 0; x < dx; ++x) {
-        var c = d3.rgb(color(data[y][x+2]));
+        var c = d3.rgb(color(data[x][y+2]));
         image.data[++p] = c.r;
         image.data[++p] = c.g;
         image.data[++p] = c.b;
@@ -243,6 +235,8 @@ is available on github, where merge requests are welcome.</p>
 <p>Anispectrogram is based on <a href="http://bl.ocks.org/mbostock/3074470">mbostock's heatmap example</a>
 and is released under the <a href="http://opensource.org/licenses/BSD-3-Clause">BSD license</a>. 
 Copyright 2015 <a href="https://ie.linkedin.com/in/robertfuller">Rob Fuller</a></p>
+<canvas id="anispectogram"></canvas>
+<svg><g id="xaxis"></g><g id="yaxis"></g></svg>
 <script>
 do_fetch_next();
 setTimeout(update_spectrogram,100);
