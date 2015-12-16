@@ -63,18 +63,18 @@ var width = 960,
       .range(["#0000ff","#33cc33","#ffff00","#ff9933", "#cc3300"]);
 
   var yAxis = d3.svg.axis()
-  	  .scale(y)
+        .scale(y)
       .orient("right")
       .tickFormat(function(d, i){
-   		 return ""+buckets[d]+" Hz";
-	});
+            return ""+buckets[d]+" Hz";
+    });
 
   var xAxis = d3.svg.axis()
       .scale(x)
       .orient("top")
       .tickFormat(function(d, i){
-      	 return d < data.length?data[data.length-d-1][1]:"";
-	   });
+           return d < data.length?data[data.length-d-1][1]:"";
+       });
 
   d3.select("canvas")
       .attr("width", dx)
@@ -126,28 +126,28 @@ function getFFTData(t){
     var text = t.split('\n'), l = "";
     var start_date = "";
     while(text.length > 0 ){
-    	l = text.shift();
-    	if(l.match("^Start Date")){
-    		start_date = l.split(/\s+/)[2];
-    	}
-    	if( l.match("^Data:.*$")){
-    		break;
-    	}
+        l = text.shift();
+        if(l.match("^Start Date")){
+            start_date = l.split(/\s+/)[2];
+        }
+        if( l.match("^Data:.*$")){
+            break;
+        }
     }
     var data = [];
     for(var i=0;i<text.length;i++){
-    	var a = text[i].split(/\t/);
-    	if(i>0 && a.length < data[i-1].length){
-    		break;
-    	}
-    	data[i] = a;
-    	var time = data[i][0];
-    	data[i] = data[i].slice(6);
-    	for(var j=0; j<data[i].length;j++){
-    		data[i][j] = parseInt(data[i][j]);
-    	}
-    	data[i].unshift(time);
-    	data[i].unshift(start_date);
+        var a = text[i].split(/\t/);
+        if(i>0 && a.length < data[i-1].length){
+            break;
+        }
+        data[i] = a;
+        var time = data[i][0];
+        data[i] = data[i].slice(6);
+        for(var j=0; j<data[i].length;j++){
+            data[i][j] = parseInt(data[i][j]);
+        }
+        data[i].unshift(time);
+        data[i].unshift(start_date);
     }
     return data;
 
@@ -163,15 +163,17 @@ function checkStatus(response) {
 }
 var fft_data = [];
 var buckets = [];
- var urls = [];
- var urlprefix = "http://spidvid.cloudapp.net/data/hydrophones/SBF1323/2015/12/16/SBF1323_20151216_";
- var urlsuffix = "00.txt";
-for(var h=0; h<23; h++){
-	for(var m=0;m<59; m++){
-		var hh = "0"+h;
-		var mm = "0"+m;
-		urls.push(urlprefix+hh.substring(hh.length-2)+mm.substring(mm.length-2)+urlsuffix);
-	}
+var urls = [];
+
+var set_time_urls = function(){
+  var e = document.getElementById("time");
+  var nurls = [];
+  for(var i=e.selectedIndex; i<e.options.length;i++){
+      nurls.push(e.options[i].value);
+  }
+  urls = nurls;
+  fft_data = [];
+  buckets = [];
 }
 
 var min_lines = 250;
@@ -179,51 +181,124 @@ var max_lines = 1000;
 var max_buffer = 50000;
 var shift_lines = 50;
 var update_freq = 50;
+var data_url = "http://spiddal.marine.ie/data/hydrophones/SBF1323/";
 var update_spectrogram = function(){
-	try{
-		if(fft_data.length > max_lines){
-			for(var i=0;i<shift_lines;i++){
-			  fft_data.shift();
-			}
-		}
-		if(fft_data.length>0){
-		  var slice = Math.min(max_lines,fft_data.length);
-		  var data = fft_data.slice(0,slice);
-		  //data = data.reverse();
+    try{
+        if(fft_data.length > max_lines){
+            for(var i=0;i<shift_lines;i++){
+              fft_data.shift();
+            }
+        }
+        if(fft_data.length>0){
+          var slice = Math.min(max_lines,fft_data.length);
+          var data = fft_data.slice(0,slice);
+          //data = data.reverse();
           spectrogram(data,buckets);
         }
-	}finally{
-		setTimeout(update_spectrogram,update_freq);
-	}
-	first_time = false;
+    }finally{
+        setTimeout(update_spectrogram,update_freq);
+    }
+    first_time = false;
 };
-var do_fetch_next = function(){
- 	if(fft_data.length >= max_buffer){
-        setTimeout(do_fetch_next,1000);
+var fetch_hydrophone_data_next = function(){
+    if(fft_data.length >= max_buffer){
+        setTimeout(fetch_hydrophone_data_next,1000);
         return;
- 	}
-	var url = urls.shift();
+    }
+    var url = urls.shift();
     if(url){
-    	do_fetch(url);
+        fetch_hydrophone_data(url);
     }else{
-    	setTimeout(do_fetch_next,1000);
+        setTimeout(fetch_hydrophone_data_next,1000);
     }
 };
- var do_fetch = function(url){
+ var fetch_hydrophone_data = function(url){
   fetch(url)
     .then(checkStatus)
     .then(function(response) {
-  	return response.text();
+      return response.text();
   }).then(function(t) {
-  	var data = getFFTData(t);
+      var data = getFFTData(t);
     buckets = data.shift();
     fft_data.push.apply(fft_data,data);
-    setTimeout(do_fetch_next,500);
+    setTimeout(fetch_hydrophone_data_next,500);
   }).catch(function(error) {
     console.log('request failed', error);
-    do_fetch_next();
+    fetch_hydrophone_data_next();
   })
 };
+var get_links=function(url,pattern,callback){
+ fetch(url)
+  .then(checkStatus)
+  .then(function(response){
+    return response.text();
+  }).then(function(text){
+    var d = document.createElement("div");
+    d.innerHTML = text;
+    wanted = [];
+    var a = d.querySelectorAll('a');
+    for(var i=0;i<a.length;i++){
+      var href = a[i].getAttribute("href");
+      if(href.match(pattern)){
+        wanted.push(href);
+      }
+    }
+    callback(wanted);
+  }).catch(function(error) {
+    console.log('request failed', error);
+  });
+};
+var a_to_options = function(base_url,a,selected,transform){
+   var options = [];
+   for(var i=0;i<a.length;i++){
+      options.push("<option value='"+base_url+a[i]+"' ");
+      if(i == selected){
+         options.push("selected='selected'");
+      }
+      options.push(">"+transform(a[i])+"</option>");
+   }
+   return options.join("");
+}
+var set_year_options = function(callback){
+    get_links(data_url,/^\d{4}\//, function(a){
+       options = a_to_options(data_url,a,a.length-1,function(t){return t;});
+       document.getElementById("year").innerHTML = options;
+       set_month_options(callback);
+    }); 
+}
+var set_month_options = function(callback){
+    var e = document.getElementById("year");
+    var yurl = e.options[e.selectedIndex].value;
+    console.log(yurl);
+    get_links(yurl,/^\d{2}\//, function(a){
+       options = a_to_options(yurl,a,a.length-1, function(t){return t;});
+       document.getElementById("month").innerHTML = options;
+       set_day_options(callback);
+    }); 
+}
+var set_day_options = function(callback){
+    var e = document.getElementById("month");
+    var murl = e.options[e.selectedIndex].value;
+    get_links(murl,/^\d{2}\//, function(a){
+       options = a_to_options(murl,a,a.length-1, function(t){return t;});
+       document.getElementById("day").innerHTML = options;
+       set_time_options(callback);
+    }); 
+}
+var set_time_options = function(callback){
+    var e = document.getElementById("day");
+    var durl = e.options[e.selectedIndex].value;
+    get_links(durl,/_\d{8}_\d{6}.txt/, function(a){
+       var regex = /.*_(\d\d)(\d\d)[^_]*$/;
+       options = a_to_options(durl,a,0,function(t){
+            return t.replace(regex,"$1:$2");
+          });
+       document.getElementById("time").innerHTML = options;
+       if(callback){
+          callback();
+       }
+    }); 
+}
 </script>
 </head>
 <body>
@@ -235,10 +310,18 @@ is available on github, where merge requests are welcome.</p>
 <p>Anispectrogram is based on <a href="http://bl.ocks.org/mbostock/3074470">mbostock's heatmap example</a>
 and is released under the <a href="http://opensource.org/licenses/BSD-3-Clause">BSD license</a>. 
 Copyright 2015 <a href="https://ie.linkedin.com/in/robertfuller">Rob Fuller</a></p>
+<p>
+<select id="year" onchange="set_month_options()" name="year"></select>
+<select id="month" onchange="set_day_options()" name="month"></select>
+<select id="day" onchange="set_time_options()" name="day"></select>
+<select id="time" name="time"></select>
+<input type="button" onclick="set_time_urls()" name="go" value="go">
+</p>
 <canvas id="anispectogram"></canvas>
 <svg><g id="xaxis"></g><g id="yaxis"></g></svg>
 <script>
-do_fetch_next();
+set_year_options(set_time_urls);
+fetch_hydrophone_data_next();
 setTimeout(update_spectrogram,100);
 </script>
 <a href="https://github.com/fullergalway/anispectrogram"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://camo.githubusercontent.com/e7bbb0521b397edbd5fe43e7f760759336b5e05f/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f677265656e5f3030373230302e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_green_007200.png"></a>
