@@ -20,12 +20,14 @@ canvas {
 
 .axis text {
   font: 10px sans-serif;
+  stroke: #FFF;
+  shape-rendering: crispEdges;
 }
 
 .axis path,
 .axis line {
   fill: none;
-  stroke: #000;
+  stroke: #FFF;
   shape-rendering: crispEdges;
 }
 
@@ -73,7 +75,7 @@ var width = 960,
       .scale(x)
       .orient("top")
       .tickFormat(function(d, i){
-           return d < data.length?data[data.length-d-1][1]:"";
+           return d < data.length?data[d][1]:"";
        });
 
   d3.select("canvas")
@@ -165,8 +167,26 @@ var fft_data = [];
 var buckets = [];
 var urls = [];
 
+var getSelectedText = function(elementId){
+   var e = document.getElementById(elementId);
+  if (e.selectedIndex == -1) return null;
+  return e.options[e.selectedIndex].text;
+}
+var getSelectedValue = function(elementId){
+   var e = document.getElementById(elementId);
+  if (e.selectedIndex == -1) return null;
+  return e.options[e.selectedIndex].value;
+}
 var set_time_urls = function(){
+  pause();
   var e = document.getElementById("time");
+  if (e.selectedIndex == -1) return;
+  var hash = '#'+getSelectedText('year')
+             + getSelectedText('month')
+             + getSelectedText('day')
+             + getSelectedText('time');
+  document.location.hash = hash;
+  var time = e.options[e.selectedIndex].text;
   var nurls = [];
   for(var i=e.selectedIndex; i<e.options.length;i++){
       nurls.push(e.options[i].value);
@@ -174,6 +194,7 @@ var set_time_urls = function(){
   urls = nurls;
   fft_data = [];
   buckets = [];
+  resume();
 }
 
 var min_lines = 250;
@@ -181,9 +202,22 @@ var max_lines = 1000;
 var max_buffer = 50000;
 var shift_lines = 50;
 var update_freq = 50;
+var paused = false;
+var resume = function(){
+    paused = false;
+    document.getElementById('pause_resume').value = "pause";
+}
+var pause = function(){
+    paused = true;
+    document.getElementById('pause_resume').value = "resume";
+}
+var pause_resume = function(){
+    paused?resume():pause();
+}
 var data_url = "http://spiddal.marine.ie/data/hydrophones/SBF1323/";
 var update_spectrogram = function(){
     try{
+      if(!paused){
         if(fft_data.length > max_lines){
             for(var i=0;i<shift_lines;i++){
               fft_data.shift();
@@ -192,9 +226,9 @@ var update_spectrogram = function(){
         if(fft_data.length>0){
           var slice = Math.min(max_lines,fft_data.length);
           var data = fft_data.slice(0,slice);
-          //data = data.reverse();
           spectrogram(data,buckets);
         }
+      }
     }finally{
         setTimeout(update_spectrogram,update_freq);
     }
@@ -248,20 +282,33 @@ var get_links=function(url,pattern,callback){
     console.log('request failed', error);
   });
 };
-var a_to_options = function(base_url,a,selected,transform){
+var a_to_options = function(base_url,a,hash_pattern,default_selected_index,transform){
    var options = [];
+   var selected = default_selected_index;
+   if(document.location.hash.match(hash_pattern)){
+     var wanted = document.location.hash.match(hash_pattern)[1];
+     for(var i=0;i<a.length;i++){
+       var text = transform(a[i]);
+       if(text == wanted){
+         selected = i;
+         break;
+       }
+     }
+   }
    for(var i=0;i<a.length;i++){
       options.push("<option value='"+base_url+a[i]+"' ");
+      var text = transform(a[i]);
       if(i == selected){
          options.push("selected='selected'");
       }
-      options.push(">"+transform(a[i])+"</option>");
+      options.push(">"+text+"</option>");
    }
    return options.join("");
 }
 var set_year_options = function(callback){
     get_links(data_url,/^\d{4}\//, function(a){
-       options = a_to_options(data_url,a,a.length-1,function(t){return t;});
+       var pattern = /#(20[0-9][0-9]\/)[01][0-9]\/[0-3][0-9]\/[0-2][0-9]:[0-5][0-9]/; 
+       var options = a_to_options(data_url,a,pattern,a.length-1,function(t){return t;});
        document.getElementById("year").innerHTML = options;
        set_month_options(callback);
     }); 
@@ -269,9 +316,9 @@ var set_year_options = function(callback){
 var set_month_options = function(callback){
     var e = document.getElementById("year");
     var yurl = e.options[e.selectedIndex].value;
-    console.log(yurl);
     get_links(yurl,/^\d{2}\//, function(a){
-       options = a_to_options(yurl,a,a.length-1, function(t){return t;});
+       var pattern = /#20[0-9][0-9]\/([01][0-9]\/)[0-3][0-9]\/[0-2][0-9]:[0-5][0-9]/; 
+       var options = a_to_options(yurl,a,pattern,a.length-1, function(t){return t;});
        document.getElementById("month").innerHTML = options;
        set_day_options(callback);
     }); 
@@ -280,7 +327,8 @@ var set_day_options = function(callback){
     var e = document.getElementById("month");
     var murl = e.options[e.selectedIndex].value;
     get_links(murl,/^\d{2}\//, function(a){
-       options = a_to_options(murl,a,a.length-1, function(t){return t;});
+       var pattern = /#20[0-9][0-9]\/[01][0-9]\/([0-3][0-9]\/)[0-2][0-9]:[0-5][0-9]/; 
+       var options = a_to_options(murl,a,pattern,a.length-1, function(t){return t;});
        document.getElementById("day").innerHTML = options;
        set_time_options(callback);
     }); 
@@ -290,7 +338,8 @@ var set_time_options = function(callback){
     var durl = e.options[e.selectedIndex].value;
     get_links(durl,/_\d{8}_\d{6}.txt/, function(a){
        var regex = /.*_(\d\d)(\d\d)[^_]*$/;
-       options = a_to_options(durl,a,0,function(t){
+       var pattern = /#20[0-9][0-9]\/[01][0-9]\/[0-3][0-9]\/([0-2][0-9]:[0-5][0-9])/; 
+       var options = a_to_options(durl,a,pattern,0,function(t){
             return t.replace(regex,"$1:$2");
           });
        document.getElementById("time").innerHTML = options;
@@ -309,13 +358,14 @@ data from the <a href="http://spiddal.marine.ie/data.html">Irish Marine Institut
 is available on github, where merge requests are welcome.</p>
 <p>Anispectrogram is based on <a href="http://bl.ocks.org/mbostock/3074470">mbostock's heatmap example</a>
 and is released under the <a href="http://opensource.org/licenses/BSD-3-Clause">BSD license</a>. 
-Copyright 2015 <a href="https://ie.linkedin.com/in/robertfuller">Rob Fuller</a></p>
+Copyright 2015 <a href="https://ie.linkedin.com/in/robertfuller">Rob Fuller</a> and <a href="http://www.marine.ie/">Irish Marine Institute</a></p>
 <p>
 <select id="year" onchange="set_month_options()" name="year"></select>
 <select id="month" onchange="set_day_options()" name="month"></select>
 <select id="day" onchange="set_time_options()" name="day"></select>
 <select id="time" name="time"></select>
 <input type="button" onclick="set_time_urls()" name="go" value="go">
+<input type="button" onclick="pause_resume()" name="pause_resume" id="pause_resume" value="pause">
 </p>
 <canvas id="anispectogram"></canvas>
 <svg><g id="xaxis"></g><g id="yaxis"></g></svg>
