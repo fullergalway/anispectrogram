@@ -40,18 +40,37 @@ canvas {
 <script>
 // see http://bl.ocks.org/mbostock/3074470
 
-var width = 960,
-    height = 500;
-  function spectrogram(data,buckets){
-  var dy = data[0].length-2,
-      dx = data.length;
+var rgb_cache = {};
+var width = 1000,
+    height = 491;
+var width_rows = 1000;
+var drps = 100;
+var updated_time = 0;
 
+function spectrogram(){
+  if(data_rows.length < width_rows) return;
 
-  // Fix the aspect ratio.
-  // var ka = dy / dx, kb = height / width;
-  // if (ka < kb) height = width * ka;
-  // else width = height / ka;
-
+  var dy = data_rows[0].data.length-2;
+  var dx = width_rows;
+  var first_seq_no = data_rows[0].seq_no;
+  var offset = start_seq_no - first_seq_no;
+  if(offset >= data_rows.length){
+     return;
+  }
+  var now = new Date().getTime();
+  var shift_lines = Math.min(Math.ceil((now - updated_time)*drps/1000),Math.ceil(dx/5));
+  
+  if(offset < 0 || start_seq_no < 0){
+     offset = 0;
+     start_seq_no = first_seq_no;
+  }else{
+     start_seq_no = start_seq_no+shift_lines;
+  }
+  var limit = offset + shift_lines + shift_lines;
+  if(limit >= data_rows.length){
+      return;
+  }
+  
   var x = d3.scale.linear()
       .domain([0, dx])
       .range([0, width]);
@@ -68,22 +87,29 @@ var width = 960,
         .scale(y)
       .orient("right")
       .tickFormat(function(d, i){
-            return ""+buckets[d]+" Hz";
+            return ""+data_rows[0].headers[d]+" Hz";
     });
 
   var xAxis = d3.svg.axis()
       .scale(x)
       .orient("top")
       .tickFormat(function(d, i){
-           return d < data.length?data[d][1]:"";
+           var k = limit - dx + d;
+           return k >= 0?data_rows[k].data[1]:"";
        });
 
-  d3.select("canvas")
+  var hk = Math.max(limit-dx,0);
+  document.location.hash = data_rows[hk].hash;
+
+/*
+    d3.select("#anispectrogram")
       .attr("width", dx)
       .attr("height", dy)
       .style("width", width + "px")
-      .style("height", height + "px")
-      .call(drawImage);
+      .style("height", height + "px");
+      //.call(drawImage);
+*/
+
 
   var svg = d3.select("svg")
       .attr("width", width)
@@ -100,14 +126,62 @@ var width = 960,
       .call(yAxis)
       .call(removeZero);
 
-  // Compute the pixel colors; scaled by CSS.
-  function drawImage(canvas) {
-    var context = canvas.node().getContext("2d"),
-        image = context.createImageData(dx, dy);
+  drawImage(acontext);
+  updated_time = now;
+  for(var i=0; i<offset && data_rows.length>max_buffer;i++){
+     data_rows.shift();
+  }
+  function drawImage(context) {
+    var image = null, orig = null;
+    var shiftx = shift_lines;
+    var orig = null;
+    if(shiftx<dx){
+        orig = context.getImageData(shiftx,0,dx-shiftx,dy);
+    }
+    var image = context.getImageData(dx-shiftx,0,shiftx,dy);
+    var c = null;
+    var xstart = shiftx > 0?limit-shiftx:offset;
+    for (var y = 0, p = -1; y < dy ; ++y) {
+      for (var x = xstart; x < limit; x++) {
+          var k = data_rows[x].data[y+2];
+          if(k in rgb_cache){
+              c = rgb_cache[k];
+          }else{
+              c = d3.rgb(color(k));
+              rgb_cache[k] = c;
+          }
+        image.data[++p] = c.r;
+        image.data[++p] = c.g;
+        image.data[++p] = c.b;
+        image.data[++p] = 255;
+      }
+    }
+    if(orig != null){
+      context.putImageData(orig, 0, 0);
+    }
+    context.putImageData(image, dx-shiftx, 0);
+   
+  }
 
+  // Compute the pixel colors; scaled by CSS.
+  function drawImage_orig(canvas) {
+    var context = canvas.node().getContext("2d");
+    var image = context.getImageData(0,0,dx,dy);
+    var newImageData = false;
+    if(image == null || image.length != dx*dy){
+        image = context.createImageData(dx, dy);
+        newImageData = true;
+    }
+    var c = null;
     for (var y = 0, p = -1; y < dy; ++y) {
       for (var x = 0; x < dx; ++x) {
-        var c = d3.rgb(color(data[x][y+2]));
+          var k = data[x][y+2];
+          if(k in rgb_cache){
+              c = rgb_cache[k];
+          }else{
+              c = d3.rgb(color(k));
+              rgb_cache[k] = c;
+          }
         image.data[++p] = c.r;
         image.data[++p] = c.g;
         image.data[++p] = c.b;
@@ -115,7 +189,9 @@ var width = 960,
       }
     }
 
-    context.putImageData(image, 0, 0);
+    if(newImageData){
+      context.putImageData(image, 0, 0);
+    }
   }
 
   function removeZero(axis) {
@@ -124,7 +200,8 @@ var width = 960,
  }
 </script>
 <script>
-function getFFTData(t){
+var fft_seq_no = 0;
+function getFFTData(fetch_obj,t){
     var text = t.split('\n'), l = "";
     var start_date = "";
     while(text.length > 0 ){
@@ -136,22 +213,25 @@ function getFFTData(t){
             break;
         }
     }
-    var data = [];
+    var headers = null;
     for(var i=0;i<text.length;i++){
         var a = text[i].split(/\t/);
-        if(i>0 && a.length < data[i-1].length){
+        if(i>0 && a.length < headers.length){
             break;
         }
-        data[i] = a;
-        var time = data[i][0];
-        data[i] = data[i].slice(6);
-        for(var j=0; j<data[i].length;j++){
-            data[i][j] = parseInt(data[i][j]);
+        var time = a[0];
+        a = a.slice(6);
+        for(var j=0; j<a.length;j++){
+            a[j] = parseInt(a[j]);
         }
-        data[i].unshift(time);
-        data[i].unshift(start_date);
+        a.unshift(time);
+        a.unshift(start_date);
+        if(i == 0){
+          headers = a;
+        }else{
+          data_rows.push({ seq_no: fft_seq_no++, row: i, headers: headers, data: a, url: fetch_obj.url, hash: fetch_obj.hash});
+        }
     }
-    return data;
 
 }
 function checkStatus(response) {
@@ -163,8 +243,9 @@ function checkStatus(response) {
     throw error
   }
 }
-var fft_data = [];
-var buckets = [];
+var data_rows = [];
+var start_seq_no = -1;
+
 var urls = [];
 
 var getSelectedText = function(elementId){
@@ -179,29 +260,25 @@ var getSelectedValue = function(elementId){
 }
 var set_time_urls = function(){
   pause();
+  data_rows = [];
+  start_seq_no = -1;
   var e = document.getElementById("time");
   if (e.selectedIndex == -1) return;
-  var hash = '#'+getSelectedText('year')
+  var hash_day = '#'+getSelectedText('year')
              + getSelectedText('month')
-             + getSelectedText('day')
-             + getSelectedText('time');
-  document.location.hash = hash;
+             + getSelectedText('day');
+  document.location.hash = hash_day + getSelectedText('time');
   var time = e.options[e.selectedIndex].text;
   var nurls = [];
   for(var i=e.selectedIndex; i<e.options.length;i++){
-      nurls.push(e.options[i].value);
+      nurls.push({hash: hash_day+e.options[i].text, url:e.options[i].value});
   }
   urls = nurls;
-  fft_data = [];
-  buckets = [];
   resume();
 }
 
-var min_lines = 250;
-var max_lines = 1000;
-var max_buffer = 50000;
-var shift_lines = 50;
-var update_freq = 50;
+var max_buffer = 100000;
+var update_freq = 100;
 var paused = false;
 var resume = function(){
     paused = false;
@@ -218,43 +295,31 @@ var data_url = "http://spiddal.marine.ie/data/hydrophones/SBF1323/";
 var update_spectrogram = function(){
     try{
       if(!paused){
-        if(fft_data.length > max_lines){
-            for(var i=0;i<shift_lines;i++){
-              fft_data.shift();
-            }
-        }
-        if(fft_data.length>0){
-          var slice = Math.min(max_lines,fft_data.length);
-          var data = fft_data.slice(0,slice);
-          spectrogram(data,buckets);
-        }
+        spectrogram();
       }
     }finally{
         setTimeout(update_spectrogram,update_freq);
     }
-    first_time = false;
 };
 var fetch_hydrophone_data_next = function(){
-    if(fft_data.length >= max_buffer){
+    if(data_rows.length >= max_buffer){
         setTimeout(fetch_hydrophone_data_next,1000);
         return;
     }
-    var url = urls.shift();
-    if(url){
-        fetch_hydrophone_data(url);
+    var fetch_obj = urls.shift();
+    if(fetch_obj){
+        fetch_hydrophone_data(fetch_obj);
     }else{
         setTimeout(fetch_hydrophone_data_next,1000);
     }
 };
- var fetch_hydrophone_data = function(url){
-  fetch(url)
+ var fetch_hydrophone_data = function(fetch_obj){
+  fetch(fetch_obj.url)
     .then(checkStatus)
     .then(function(response) {
       return response.text();
   }).then(function(t) {
-      var data = getFFTData(t);
-    buckets = data.shift();
-    fft_data.push.apply(fft_data,data);
+    getFFTData(fetch_obj,t);
     setTimeout(fetch_hydrophone_data_next,500);
   }).catch(function(error) {
     console.log('request failed', error);
@@ -358,7 +423,7 @@ var set_time_options = function(callback){
 <h1>D3.js Animated Spectrogram Example</h1>
 <p>Animated spectrogram visualisation of <a href="http://oceansonics.com/iclisten-smart-hydrophones/">hydrophone</a> 
 data from the <a href="http://spiddal.marine.ie/data.html">Irish Marine Institute</a> implemented in <a href="http://d3js.org">d3.js</a>.</p>
-<p>This is a preliminary implementation without optimisations, for which the <a href="https://github.com/fullergalway/anispectrogram">full source</a> 
+<p>This is a preliminary implementation, for which the <a href="https://github.com/fullergalway/anispectrogram">full source</a> 
 is available on github, where merge requests are welcome.</p>
 <p>Anispectrogram is based on <a href="http://bl.ocks.org/mbostock/3074470">mbostock's heatmap example</a>
 and is released under the <a href="http://opensource.org/licenses/BSD-3-Clause">BSD license</a>. 
@@ -370,10 +435,14 @@ Copyright 2015 <a href="https://ie.linkedin.com/in/robertfuller">Rob Fuller</a> 
 <select id="time" name="time"></select>
 <input type="button" onclick="set_time_urls()" name="go" value="go">
 <input type="button" onclick="pause_resume()" name="pause_resume" id="pause_resume" value="pause">
+slow<input type="range" name="speed" onchange="drps=this.value*this.value;" value="10" min="1" max="100">fast
 </p>
-<canvas id="anispectogram"></canvas>
+<canvas width=1000 height=491 id="anispectrogram" style="width: 950px; height: 591px"></canvas>
 <svg><g id="xaxis"></g><g id="yaxis"></g></svg>
 <script>
+var canvas = document.getElementById("anispectrogram");
+var acontext = canvas.getContext("2d");
+acontext.createImageData(width,height);
 set_year_options(set_time_urls);
 fetch_hydrophone_data_next();
 setTimeout(update_spectrogram,100);
