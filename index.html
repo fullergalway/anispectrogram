@@ -87,6 +87,8 @@ function spectrogram(){
         .scale(y)
       .orient("right")
       .tickFormat(function(d, i){
+            var hz = parseInt(data_rows[0].headers[d]);
+            return isNaN(hz)?"":hz>1000?(""+(hz/1000)+"kHz"):(""+hz+" Hz");
             return ""+data_rows[0].headers[d]+" Hz";
     });
 
