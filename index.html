@@ -84,6 +84,7 @@ function spectrogram(){
       .range(["#0000ff","#33cc33","#ffff00","#ff9933", "#cc3300"]);
 
   var yAxis = d3.svg.axis()
+        .ticks(20)
         .scale(y)
       .orient("right")
       .tickFormat(function(d, i){
@@ -143,7 +144,7 @@ function spectrogram(){
     var image = context.getImageData(dx-shiftx,0,shiftx,dy);
     var c = null;
     var xstart = shiftx > 0?limit-shiftx:offset;
-    for (var y = 0, p = -1; y < dy ; ++y) {
+    for (var y = dy-1, p = -1; y > 0 ; y--) {
       for (var x = xstart; x < limit; x++) {
           var k = data_rows[x].data[y+2];
           if(k in rgb_cache){
