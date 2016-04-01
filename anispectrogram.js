@@ -1,22 +1,24 @@
 
-if (typeof fetch != 'function') {
-  console.log("be sure to load the fetch.js library which is needed for anispectogram.js");
-}
+
 function Anispectrogram(id,options){
   options = options || {};
   this.id=id;
   this.width = options.width ? parseInt(options.width) || 800 : 800
   this.height = options.height ? parseInt(options.height) || 400 : 400;
   this.data_url = options["hydrophone-url"] || "http://spiddal.marine.ie/data/hydrophones/SBF1323/";
+  this.mqtt_topic = options["mqtt-topic"] || 'spiddal-hydrophone';
   this.update_location_hash = true;
   if(options["update-location-hash"] !== undefined){
-    this.update_location_hash = options["update-location-hash"];
+    this.update_location_hash = options["update-location-hash"] == "true";
   }
 
   this.controls = options.controls === undefined? true:(options.controls===true || options.controls == "true");
+  this.mqtt_enabled = options.mqtt === undefined? true:(options.mqtt===true || options.mqtt == "true");
+  this.mqtt_url = options["mqtt-url"] ===undefined ? 'mqtt://mqtt.marine.ie': options["mqtt-url"] ;
+  this.live = false;
   this.rgb_cache = {};
   this.width_rows = this.width;
-  this.drps = 100;
+  this.drps = 50;
   this.updated_time = 0;
   this.fft_seq_no = 0;
   this.data_rows = [];
@@ -25,29 +27,38 @@ function Anispectrogram(id,options){
   this.foreground_color = options["foreground-color"] || "#FFFFFF";
   this.background_color = options["background-color"] || "#101214";
 
-  this.max_buffer = 100000;
+  this.max_buffer = this.dprs*60*2;//max 2 minutes of preloaded data.
   this.update_freq = 100;
   this.paused = false;
   this.idprefix = ""+this.id+"_";
   this.axisclass = ""+this.id+"_axis";
+  this.was_paused = false;
   this.embed();
+  var default_stop = 20;
+  var autostop = options.autostop === undefined ? default_stop : isNaN(parseInt(options.autostop))?default_stop:parseInt(options.autostop);
+  if(autostop > 0){
+    var that = this;
+    setTimeout(function(){that.pause()},autostop*1000);
+  }
 };
+  Anispectrogram.prototype.hideControls = function () {
+    document.getElementById(this.idprefix+'_controls').style.display = 'none';
+  };
   Anispectrogram.prototype.embed = function(){
-    /*
-    var client  = mqtt.connect('mqtt://mqtt.marine.ie');
-    client.on('connect', function () {
-      client.subscribe('spiddal-ctd');
-    });
-    client.on("message", function(topic, payload) {
-      document.getElementById(topic).textContent = payload;
-    });
-    */
+    var that = this;
   // see http://bl.ocks.org/mbostock/3074470
 
   var css =
   '.'+this.axisclass+' text {font: 10px sans-serif; stroke: '+this.foreground_color+';  shape-rendering: crispEdges;}'
   +'.'+this.axisclass+' path, .'+this.axisclass+' line { fill: none; stroke: '+this.foreground_color+';  shape-rendering: crispEdges; }'
-  +'.'+this.axisclass+' path { display: none; }';
+  +'.'+this.axisclass+' path { display: none; }'
+  +'#'+this.idprefix+'play{ display: block; opacity: 0.8; transition: all 1.2s linear; width: 75px; height: 40px; background: white; position: absolute; border-radius: 5px; border: 1px solid black; z-index: 999; '
+  + ' margin-top: '+Math.floor(this.height/2-20)+'px;'
+  + ' margin-left: '+Math.floor(this.width/2-37.5)+'px; }'
+  +'#'+this.idprefix+'play:hover { background-color:#00adef; }'
+  +'#'+this.idprefix+'play:before { width: 0; height: 0; border-left: 30px solid black; border-right: 30px solid transparent; border-top: 15px solid transparent;'
+  +' border-bottom: 15px solid transparent; position: absolute; content: ""; top: 5px; left: 30%;}';
+
   var style = document.createElement("style");
   style.innerHTML = css;
   document.head.appendChild(style);
@@ -62,29 +73,54 @@ function Anispectrogram(id,options){
   +'slow<input type="range" id="'+this.idprefix+'speed" name="'+this.idprefix+'speed" value="10" min="1" max="100">fast'
   +'</p>'
   +'</div>'
-  +'<div  style="width: '+this.width+'px; height: '+this.height+'px">'
+  +'<div id="'+this.idprefix+'container"  style="width: '+this.width+'px; height: '+this.height+'px">'
   +'<svg style="position: absolute; display: inline" id="'+this.idprefix+'svg" width="'+this.width+'" height="'+(this.height+20)+'">'
   +'<rect height="100%" width="100%" fill="#101214"></rect>'
   +'<g id="'+this.idprefix+'xaxis"></g><g id='+this.idprefix+'"yaxis"></g>'
   +'</svg>'
   +'<canvas style="position: absolute; display: inline"  width='+this.width+' height='+this.height+' id="'+this.idprefix+'anispectrogram" style="width: '+this.width+'px; height: '+this.height+'px"></canvas>'
+  +'<div id="'+this.idprefix+'play"></div>'
   +'</div>';
-  var that = this;
   if(!this.controls){
-    document.getElementById(this.idprefix+'_controls').style.display = 'none';
+    this.hideControls();
   }
-  document.getElementById(this.idprefix+'year').addEventListener("change",function(){that.set_month_options()});
-  document.getElementById(this.idprefix+'month').addEventListener("change",function(){that.set_day_options()});
-  document.getElementById(this.idprefix+'day').addEventListener("change",function(){that.set_time_options()});
-  document.getElementById(this.idprefix+'go').addEventListener("click",function(){that.set_time_urls()});
-  document.getElementById(this.idprefix+'pause_resume').addEventListener("click",function(){that.pause_resume()});
+  document.getElementById(this.idprefix+'year').addEventListener("change",function(){that.set_month_options();});
+  document.getElementById(this.idprefix+'month').addEventListener("change",function(){that.set_day_options();});
+  document.getElementById(this.idprefix+'day').addEventListener("change",function(){that.set_time_options();});
+  document.getElementById(this.idprefix+'go').addEventListener("click",function(){that.set_time_urls();});
+  document.getElementById(this.idprefix+'pause_resume').addEventListener("click",function(){that.pause_resume();});
   document.getElementById(this.idprefix+'speed').addEventListener("change",function(){that.drps=this.value*this.value;});
+  document.getElementById(this.idprefix+'container').addEventListener("click",function(){that.pause_resume();});
   var canvas = document.getElementById(this.idprefix+"anispectrogram");
   this.acontext = canvas.getContext("2d");
   this.imageData = this.acontext.createImageData(this.width,this.height);
   that.set_year_options(function(){that.set_time_urls();});
   that.fetch_hydrophone_data_next();
   setTimeout(function(){that.update_spectrogram();},0);
+
+  this.mqttclient = null;
+  if(this.mqtt_enabled && typeof mqtt != 'undefined'){
+    this.mqttclient = mqtt.connect(this.mqtt_url);
+    this.mqttclient.on('connect', function () {
+      that.mqttclient.subscribe(that.mqtt_topic);
+    });
+    this.mqttclient.on("message", function(topic, payload) {
+      if(that.was_paused || !that.live){
+        console.log("switching to live mqtt feed");
+        that.live = true;
+        that.was_paused = false;
+        that.drps = 4; // todo analyse payload
+        that.hideControls(); // todo allow live to be turned off?
+        that.updated_time = 0;
+        that.fft_seq_no = 0;
+        that.data_rows = [];
+        that.start_seq_no = -1;
+      }
+      var text = ""+payload;
+      // do it in the background
+      setTimeout(function(){that.getFFTData({url: that.mqtt_url, hash: "live"},text);},0);
+    });
+  }
 };
 
 Anispectrogram.prototype.set_year_options = function(done){
@@ -152,21 +188,25 @@ Anispectrogram.prototype.set_month_options = function(done){
 Anispectrogram.prototype.resume = function(){
     this.paused = false;
     document.getElementById(this.idprefix+'pause_resume').value = String.fromCharCode(10074,10074);
+    document.getElementById(this.idprefix+'play').style.opacity = 0;
+    if(this.live){
+      this.was_paused = true;
+      this.start_seq_no = this.start_seq_no - this.drps * 60;
+      this.mqttclient.subscribe(this.mqtt_topic);
+    }
 };
 Anispectrogram.prototype.pause = function(){
     this.paused = true;
     document.getElementById(this.idprefix+'pause_resume').value = String.fromCharCode(9658);
+    document.getElementById(this.idprefix+'play').style.opacity = 0.8;
+    if(this.live){
+      this.mqttclient.unsubscribe(this.mqtt_topic);
+    }
 };
 Anispectrogram.prototype.pause_resume = function(){
     this.paused?this.resume():this.pause();
-    /*
-    if(this.paused){
-      this.client.unsubscribe("spiddal-ctd");
-    }else{
-      this.client.subscribe("spiddal-ctd");
-    }
-    */
 };
+
 Anispectrogram.prototype.update_spectrogram = function(){
   var that = this;
     try{
@@ -179,7 +219,7 @@ Anispectrogram.prototype.update_spectrogram = function(){
 };
 Anispectrogram.prototype.fetch_hydrophone_data_next = function(){
     var that = this;
-    if(this.data_rows.length >= this.max_buffer){
+    if(this.live || this.paused || this.data_rows.length >= this.max_buffer){
         setTimeout(function(){that.fetch_hydrophone_data_next();},1000);
         return;
     }
@@ -197,8 +237,10 @@ Anispectrogram.prototype.fetch_hydrophone_data_next = function(){
     .then(function(response) {
       return response.text();
   }).then(function(t) {
-    that.getFFTData(fetch_obj,t);
-    setTimeout(function(){that.fetch_hydrophone_data_next();},500);
+    if(!that.live){ //todo allow switch from live to archive
+      that.getFFTData(fetch_obj,t);
+      setTimeout(function(){that.fetch_hydrophone_data_next();},500);
+   }
   }).catch(function(error) {
     console.log('request failed', error);
     that.fetch_hydrophone_data_next();
@@ -263,8 +305,16 @@ Anispectrogram.prototype.getSelectedValue = function(elementId){
   this.resume();
 };
 Anispectrogram.prototype.spectrogram = function(){
-  if(this.data_rows.length == 0 || this.data_rows.length < this.width_rows) return;
+  if(this.data_rows.length == 0) return;
+  while(this.data_rows.length < this.width_rows){
+    //backfill until some data loads
+    var copy = JSON.parse(JSON.stringify(this.data_rows[0]));
+    copy.seq_no = copy.seq_no -1;
+    copy.data[1] = "";//timestamp
+    this.data_rows.unshift(copy);
+  }
   var that = this;
+  var now = new Date().getTime();
   var dy = this.data_rows[0].data.length-2;
   var dx = this.width_rows;
   var first_seq_no = this.data_rows[0].seq_no;
@@ -272,9 +322,11 @@ Anispectrogram.prototype.spectrogram = function(){
   if(offset >= this.data_rows.length){
      return;
   }
-  var now = new Date().getTime();
-  var shift_lines = Math.min(Math.ceil((now - this.updated_time)*this.drps/1000),Math.ceil(dx/5));
-  if(offset < 0 || this.start_seq_no < 0){
+  var shift_lines = Math.min(Math.floor((now - this.updated_time)*this.drps/1000),Math.ceil(dx/5));
+  if(shift_lines == 0){
+    return;
+  }
+  if(offset < 0 || this.start_seq_no < first_seq_no){
      offset = 0;
      this.start_seq_no = first_seq_no;
   }else{
@@ -441,8 +493,8 @@ Anispectrogram.prototype.extract = function(url,pattern,cb){
       });
   };
 
-  var els = document.getElementsByClassName("anispectrogram");
-
+var loadAnispectrograms = function(){
+var els = document.getElementsByClassName("anispectrogram");
 Array.prototype.forEach.call(els, function(el) {
     if(!el.id){
       el.id = "as"+Math.floor(Math.random() * 10000000);
@@ -457,3 +509,29 @@ Array.prototype.forEach.call(els, function(el) {
     }
     new Anispectrogram(el.id,options);
 });
+};
+var myLoadScript = function(src,cb){
+  console.log("anispectrogram loading script "+src);
+ var script = document.createElement('script');
+ script.type = 'text/javascript';
+ script.async = true;
+ script.onload = function(){
+     cb();
+ };
+ script.src = src;
+ document.getElementsByTagName('head')[0].appendChild(script);
+};
+var asBeginAction = loadAnispectrograms;
+if (typeof fetch != 'function') {
+  var asBeginActionA = asBeginAction;
+  asBeginAction = function(){myLoadScript("https://cdnjs.cloudflare.com/ajax/libs/fetch/0.10.1/fetch.min.js",asBeginActionA);};
+}
+if (typeof d3 == 'undefined') {
+  var asBeginActionB = asBeginAction;
+  asBeginAction = function(){myLoadScript("https://d3js.org/d3.v3.min.js",asBeginActionB);};
+}
+if(typeof mqtt == 'undefined'){
+  var asBeginActionC = asBeginAction;
+  asBeginAction = function(){myLoadScript("http://mqtt.marine.ie/mqtt.js",asBeginActionC);};
+}
+asBeginAction();
