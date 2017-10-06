@@ -5,7 +5,7 @@ function Anispectrogram(id,options){
   this.id=id;
   this.width = options.width ? parseInt(options.width) || 800 : 800
   this.height = options.height ? parseInt(options.height) || 400 : 400;
-  this.data_url = options["hydrophone-url"] || "http://spiddal.marine.ie/data/hydrophones/SBF1323/";
+  this.data_url = options["hydrophone-url"] || "http://spiddal.marine.ie/data/hydrophones/SBF1622/";
   this.mqtt_topic = options["mqtt-topic"] || 'spiddal-hydrophone';
   this.update_location_hash = true;
   if(options["update-location-hash"] !== undefined){
