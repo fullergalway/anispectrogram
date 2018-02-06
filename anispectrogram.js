@@ -6,19 +6,22 @@ function Anispectrogram(id,options){
   this.width = options.width ? parseInt(options.width) || 800 : 800
   this.height = options.height ? parseInt(options.height) || 400 : 400;
   this.data_url = options["hydrophone-url"] || "http://spiddal.marine.ie/data/hydrophones/SBF1622/";
-  this.mqtt_topic = options["mqtt-topic"] || 'spiddal-hydrophone';
-  this.update_location_hash = true;
-  if(options["update-location-hash"] !== undefined){
-    this.update_location_hash = options["update-location-hash"] == "true";
-  }
+  this.update_location_hash = options["update-location-hash"] === undefined? true: (options["update-location-hash"] === true || options["update-location-hash"] == "true");
 
   this.controls = options.controls === undefined? true:(options.controls===true || options.controls == "true");
+  var default_stop = 30;
+  var default_mqtt_start_delay = 0;
+
+  this.mqtt_topic = options["mqtt-topic"] || 'spiddal-hydrophone';
   this.mqtt_enabled = options.mqtt === undefined? true:(options.mqtt===true || options.mqtt == "true");
   this.mqtt_url = options["mqtt-url"] ===undefined ? 'mqtt://mqtt.marine.ie': options["mqtt-url"] ;
+  this.mqtt_start_delay = options["mqtt-start-delay"] === undefined ? default_mqtt_start_delay : isNaN(parseInt(options["mqtt-start-delay"]))?default_mqtt_start_delay:parseInt(options["mqtt-start-delay"]);
+  this.mqttclient = null;
   this.live = false;
+
   this.rgb_cache = {};
   this.width_rows = this.width;
-  this.drps = 50;
+  this.drps = options.drps === undefined ? 50 : isNaN(parseInt(options.drps))?default_stop:parseInt(options.drps);;
   this.updated_time = 0;
   this.fft_seq_no = 0;
   this.data_rows = [];
@@ -34,12 +37,15 @@ function Anispectrogram(id,options){
   this.axisclass = ""+this.id+"_axis";
   this.was_paused = false;
   this.embed();
-  var default_stop = 20;
+  var that = this;
   var autostop = options.autostop === undefined ? default_stop : isNaN(parseInt(options.autostop))?default_stop:parseInt(options.autostop);
   if(autostop > 0){
-    var that = this;
     setTimeout(function(){that.pause()},autostop*1000);
   }
+  if( this.mqtt_start_delay >= 0){
+    setTimeout(function(){that.startmqtt();},this.mqtt_start_delay*1000)
+  }
+
 };
   Anispectrogram.prototype.hideControls = function () {
     document.getElementById(this.idprefix+'_controls').style.display = 'none';
@@ -98,11 +104,15 @@ function Anispectrogram(id,options){
   that.fetch_hydrophone_data_next();
   setTimeout(function(){that.update_spectrogram();},0);
 
-  this.mqttclient = null;
+};
+Anispectrogram.prototype.startmqtt = function(){
+  var that = this;
   if(this.mqtt_enabled && typeof mqtt != 'undefined'){
     this.mqttclient = mqtt.connect(this.mqtt_url);
     this.mqttclient.on('connect', function () {
-      that.mqttclient.subscribe(that.mqtt_topic);
+      if(!this.paused){
+        that.mqttclient.subscribe(that.mqtt_topic);
+      }
     });
     this.mqttclient.on("message", function(topic, payload) {
       if(that.was_paused || !that.live){
@@ -121,8 +131,7 @@ function Anispectrogram(id,options){
       setTimeout(function(){that.getFFTData({url: that.mqtt_url, hash: "live"},text);},0);
     });
   }
-};
-
+}
 Anispectrogram.prototype.set_year_options = function(done){
     var that = this;
     this.extract(that.data_url,/^\d{4}\//, function(err,a){
@@ -302,6 +311,12 @@ Anispectrogram.prototype.getSelectedValue = function(elementId){
       nurls.push({hash: hash_day+e.options[i].text, url:e.options[i].value});
   }
   this.urls = nurls;
+  if(this.mqtt_enabled){ // just the latest data
+    var url = this.urls.pop();
+    if(url !== undefined){
+      this.urls = [url];
+    }
+  }
   this.resume();
 };
 Anispectrogram.prototype.spectrogram = function(){
